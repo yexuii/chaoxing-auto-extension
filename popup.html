@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>超星学习通倍速助手</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      width: 320px;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      font-size: 12px;
+      padding: 14px;
+      line-height: 1.5;
+      user-select: none;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    .title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #4ade80;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4ade80;
+      display: inline-block;
+    }
+    .toggle-btn {
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid #22c55e;
+      background: rgba(34, 197, 94, 0.22);
+      color: #4ade80;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .toggle-btn.off {
+      border-color: #ef4444;
+      background: rgba(239, 68, 68, 0.22);
+      color: #fca5a5;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .row label {
+      color: #cbd5e1;
+      white-space: nowrap;
+    }
+    input[type="range"] {
+      flex: 1;
+      accent-color: #4ade80;
+      cursor: pointer;
+    }
+    input[type="number"] {
+      width: 56px;
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #475569;
+      border-radius: 5px;
+      padding: 3px 5px;
+      font-size: 12px;
+      text-align: center;
+    }
+    .presets {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .presets button {
+      flex: 1;
+      padding: 4px 0;
+      font-size: 11px;
+      border-radius: 4px;
+      border: 1px solid #475569;
+      background: #1e293b;
+      color: #e2e8f0;
+      cursor: pointer;
+    }
+    .presets button.active {
+      background: #16a34a;
+      border-color: #4ade80;
+      color: #ffffff;
+      font-weight: 700;
+    }
+    .presets button.max-btn {
+      flex: 1.45;
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.16);
+      color: #fbbf24;
+      font-weight: 700;
+    }
+    .presets button.max-btn.active {
+      background: #d97706;
+      border-color: #fde68a;
+      color: #ffffff;
+    }
+    .info-card {
+      background: rgba(30, 41, 59, 0.75);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .info-line {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+    .info-line:last-child {
+      margin-bottom: 0;
+    }
+    .ch-text {
+      color: #e2e8f0;
+    }
+    .max-text {
+      color: #fcd34d;
+      font-size: 11px;
+    }
+    .st-text {
+      color: #93c5fd;
+    }
+    .hint {
+      margin-top: 8px;
+      color: #94a3b8;
+      font-size: 11px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title" id="title-wrap">
+      <span class="dot" id="status-dot"></span>
+      <span>倍速 (<span id="rate-title">MAX</span>) + 自动下一节</span>
+    </div>
+    <button type="button" class="toggle-btn" id="toggle-btn">开启 [Alt+S]</button>
+  </div>
+
+  <div id="controls-wrap">
+    <div class="row">
+      <label for="rate-range">倍速 [1-16]:</label>
+      <input id="rate-range" type="range" min="1" max="16" step="0.05" value="4" />
+      <input id="rate-input" type="number" min="1" max="16" step="0.1" value="4" />
+    </div>
+
+    <div class="presets" id="presets">
+      <button type="button" data-rate="1">1x</button>
+      <button type="button" data-rate="2">2x</button>
+      <button type="button" data-rate="3">3x</button>
+      <button type="button" data-rate="4">4x</button>
+      <button type="button" data-rate="8">8x</button>
+      <button type="button" data-rate="16">16x</button>
+      <button type="button" id="max-btn" class="max-btn">MAX</button>
+    </div>
+  </div>
+
+  <div class="info-card">
+    <div class="info-line ch-text" id="ch-text">当前：正在连接学习通标签页...</div>
+    <div class="info-line max-text" id="max-text">MAX档：达25%真实时长(≥22.5%阈值)后16x冲刺</div>
+    <div class="info-line st-text" id="st-text">状态：等待连接...</div>
+  </div>
+
+  <div class="hint">页面右下角同样内置可拖动控制悬浮窗（快捷键 Alt+S）</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
