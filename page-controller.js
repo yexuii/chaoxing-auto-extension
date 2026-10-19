@@ -2,8 +2,8 @@
  * 超星学习通自动倍速与任务点助手 (Main-World Controller)
  * 功能：
  * 1. [1, 16] 可调倍速（滑块 + 数字框 + 1x/2x/3x/4x/8x/16x 预设按钮）
- * 2. MAX 动态倍速档位：基于超星服务端实际判定阈值 (rt=0.9, ds_1 允许倍速下真实观看时长阈值 22.5%，取 25% 安全值)
- *    动态计算 R = (D - 当前进度) / (0.25 * D - 真实已看时长)，达标后 16x 冲刺
+ * 2. MAX 档位：服务端要求真实观看时长 >= 视频时长 * rt / 2（约 45%），按此动态控速（约 2.2x），
+ *    服务端确认 isPassed 后 16x 冲刺；非任务点视频直接 16x
  * 3. 开关键位（悬浮窗按钮 + Alt+S 快捷键）
  * 4. 悬浮窗自由拖动并持久化坐标
  * 5. 视频 / PPT / PDF 任务点自动完成并自动切换下一标签页 / 下一章节
@@ -130,7 +130,7 @@
           );
         })
         .join(''),
-      '    <button type="button" id="cx-preset-max" data-mode="max" title="基于超星实际判定阈值(rt=0.9且允许倍速ds=1下，真实时长阈值为22.5%，取25%安全值)动态计算：R=(D-当前进度)/(0.25*D-真实已播)，满25%后16x冲刺" style="flex:1.45;padding:3px 2px;font-size:11px;font-weight:700;border-radius:4px;border:1px solid #f59e0b;background:rgba(245,158,11,0.18);color:#fbbf24;cursor:pointer;">MAX</button>',
+      '    <button type="button" id="cx-preset-max" data-mode="max" title="服务端要求真实观看时长≥视频时长×90%÷2（约45%），MAX据此动态控速（约2.2x），服务端确认任务点通过后16x冲刺；非任务点视频直接16x" style="flex:1.45;padding:3px 2px;font-size:11px;font-weight:700;border-radius:4px;border:1px solid #f59e0b;background:rgba(245,158,11,0.18);color:#fbbf24;cursor:pointer;">MAX</button>',
       '  </div>',
       '</div>',
       '<div id="cx-auto-chapter-text" style="color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;">当前：检测中...</div>',
@@ -339,12 +339,20 @@
       }
     });
 
+    function getCurrentChapterElement() {
+      const chEl = document.getElementById('chapterIdid') || document.getElementById('curChapterId');
+      const chId = (chEl && chEl.value) || '';
+      if (chId) {
+        const byId = document.getElementById('cur' + chId);
+        if (byId) return byId;
+      }
+      return document.querySelector('#coursetree .posCatalog_active');
+    }
+
     function broadcastStateToBridge() {
       try {
-        const chTitle =
-          (document.querySelector('#coursetree .posCatalog_active') &&
-            document.querySelector('#coursetree .posCatalog_active').innerText.trim().replace(/\s+/g, ' ')) ||
-          '';
+        const curEl = getCurrentChapterElement();
+        const chTitle = (curEl && curEl.innerText.trim().replace(/\s+/g, ' ')) || '';
         window.dispatchEvent(
           new CustomEvent('cx-ext-state', {
             detail: {
@@ -427,7 +435,7 @@
 
     function updateBadge(extra) {
       if (!badge) return;
-      const activeChEl = document.querySelector('#coursetree .posCatalog_active');
+      const activeChEl = getCurrentChapterElement();
       const activeTabEl = document.querySelector('#prev_tab .prev_ul li.active');
       const chTitle = activeChEl ? activeChEl.innerText.trim().replace(/\s+/g, ' ') : '';
       const tabTitle = activeTabEl ? activeTabEl.innerText.trim().replace(/\s+/g, ' ') : '';
@@ -456,20 +464,79 @@
     function isAttachmentJobFinished(iframeEl, win) {
       const attachCt = iframeEl.closest('.ans-attach-ct') || iframeEl.parentElement;
       const jobIcon = attachCt ? attachCt.querySelector('.ans-job-icon') : null;
-      if (!jobIcon && !(attachCt && attachCt.classList.contains('ans-job-finished'))) {
-        if (win && typeof win.checkJobFinish === 'function') {
-          try {
-            return !!win.checkJobFinish();
-          } catch (e) {}
-        }
-        return true;
-      }
       if (attachCt && attachCt.classList.contains('ans-job-finished')) return true;
       if (jobIcon && jobIcon.classList.contains('ans-job-finished')) return true;
       if (win && typeof win.checkJobFinish === 'function') {
         try {
           if (win.checkJobFinish()) return true;
         } catch (e) {}
+      }
+      if (!jobIcon) return true;
+      return false;
+    }
+
+    function getVideoJobState(vf, vw, cardWin, v) {
+      const attachCt = vf.closest('.ans-attach-ct') || vf.parentElement;
+      const jobIcon = attachCt ? attachCt.querySelector('.ans-job-icon') : null;
+      const domFinished = !!(
+        (attachCt && attachCt.classList.contains('ans-job-finished')) ||
+        (jobIcon && jobIcon.classList.contains('ans-job-finished'))
+      );
+
+      let mArgHasJob = false;
+      let mArgPassedOnLoad = false;
+      try {
+        const setting = cardWin && (cardWin.AttachmentSetting || cardWin.mArg);
+        const atts = (setting && setting.attachments) || [];
+        let objId = '';
+        try {
+          const dataAttr = vf.getAttribute('data') || '';
+          if (dataAttr) {
+            const parsedData = JSON.parse(dataAttr);
+            objId = (parsedData && parsedData.objectid) || '';
+          }
+        } catch (e) {}
+        const videoAtt =
+          atts.find(function (a) {
+            return (
+              a &&
+              a.type === 'video' &&
+              objId &&
+              (a.objectId === objId || (a.property && a.property.objectid === objId))
+            );
+          }) ||
+          atts.find(function (a) {
+            return a && a.type === 'video';
+          });
+        if (videoAtt) {
+          if (videoAtt.job || videoAtt.isPassed === false) {
+            mArgHasJob = true;
+          }
+          if (videoAtt.isPassed === true && !videoAtt.job) {
+            mArgPassedOnLoad = true;
+          }
+        }
+      } catch (e) {}
+
+      const hasJob = !!(jobIcon || domFinished || mArgHasJob || mArgPassedOnLoad);
+      const jobFinished = !!(domFinished || (v && v.__cxServerPassed) || mArgPassedOnLoad);
+      return { hasJob: hasJob, jobFinished: jobFinished };
+    }
+
+    function cardHasVideoInSetting(cardWin, cardDoc) {
+      try {
+        const setting = cardWin && (cardWin.AttachmentSetting || cardWin.mArg);
+        const atts = (setting && setting.attachments) || [];
+        if (
+          atts.some(function (a) {
+            return a && (a.type === 'video' || (a.property && a.property.module === 'insertvideo'));
+          })
+        ) {
+          return true;
+        }
+      } catch (e) {}
+      if (cardDoc && cardDoc.querySelector('.videoContainer, iframe[module="insertvideo"]')) {
+        return true;
       }
       return false;
     }
@@ -504,6 +571,27 @@
       return { clazzId: clazzId, courseId: courseId, cpi: cpi };
     }
 
+    // The order of mArg.attachments does not match the order of .ans-attach-ct in the card (e.g. a PPT listed
+    // first can render after the video), so containers must be matched by objectid, never by index.
+    function findAttachmentContainer(cardDoc, att) {
+      if (!cardDoc || !att) return null;
+      const objId = att.objectId || (att.property && att.property.objectid) || '';
+      if (!objId) return null;
+      const frames = Array.from(cardDoc.querySelectorAll('.ans-attach-ct iframe'));
+      for (let i = 0; i < frames.length; i++) {
+        const f = frames[i];
+        let fid = f.getAttribute('objectid') || '';
+        if (!fid) {
+          try {
+            const data = JSON.parse(f.getAttribute('data') || 'null');
+            fid = (data && data.objectid) || '';
+          } catch (e) {}
+        }
+        if (fid === objId) return f.closest('.ans-attach-ct');
+      }
+      return null;
+    }
+
     function completeDocsFromAttachmentSetting(cardWin, cardDoc) {
       let anyDocJob = false;
       let allDocJobDone = true;
@@ -513,13 +601,12 @@
           return { anyDocJob: false, allDocJobDone: true };
         }
         const def = setting.defaults;
-        const containers = cardDoc ? Array.from(cardDoc.querySelectorAll('.ans-attach-ct')) : [];
         setting.attachments.forEach(function (att, idx) {
           const isDoc =
             att && (att.type === 'document' || (att.property && att.property.module === 'insertdoc'));
           if (!isDoc) return;
           anyDocJob = true;
-          const ct = containers[idx];
+          const ct = findAttachmentContainer(cardDoc, att);
           const domFinished = !!(ct && ct.classList.contains('ans-job-finished'));
           if (!att.job || domFinished || submittedDocJobs.has(String(att.jobid) + ':done')) {
             if (ct && !ct.classList.contains('ans-job-finished')) {
@@ -655,105 +742,88 @@
       } catch (e) {}
     }
 
-    // Dynamically calculate MAX rate based on actual Chaoxing server judgment:
-    // - 90% (rt=0.9) is the video timeline progress ratio (playingTime / D >= 0.9), NOT wall-clock time.
-    // - With ds_1 (speed-up enabled), the server allows up to 4x per 60s heartbeat, so the actual
-    //   minimum real-world watch time threshold is rt / 4 = 0.9 / 4 = 22.5% (empirical pass at 23.67%).
-    // - Using 25% (0.25 * D) as the safe real-time target:
-    //   R = (D - currentTime) / (0.25 * D - realPlayed), clamped to [1, 16], and 16x once realPlayed >= 0.25 * D.
-    function computeDynamicMaxRate(vf, cardWin, v, jobFinished) {
+    // MAX rate, derived from what the Chaoxing server actually accepts (measured live, rt=0.9, ds_1):
+    // the server credits the real time elapsed between this job's heartbeat logs (accumulated across
+    // sessions and replays) and returns isPassed once that time reaches about D * rt / 2, i.e. it allows an
+    // average of 2x. Measured on a 3148s and a 3106s video: still false at 37% / 43.2% of D, passed at the
+    // next heartbeat at ~45%, regardless of whether the heartbeats were sent at 2.5x, 3x or 3.6x.
+    // Playing faster than D / (D * rt / 2) only makes the video end early and replay, so MAX paces the
+    // video to finish right when the required time is reached, then sprints at 16x once the server confirms.
+    const MAX_PRE_PASS_RATE_CAP = 3;
+    const MAX_TIME_MARGIN_SEC = 75;
+
+    function trackPlayback(v) {
+      const now = Date.now();
+      const curPos = Number(v.currentTime) || 0;
+      if (typeof v.__cxLastTickAt !== 'number') {
+        v.__cxActivePlayedSec = 0;
+        v.__cxLastTickAt = now;
+        v.__cxLastVideoPos = curPos;
+        v.__cxLastProgressAt = now;
+        return;
+      }
+      const dt = Math.max(0, Math.min(2, (now - v.__cxLastTickAt) / 1000));
+      const posDelta = Math.abs(curPos - (v.__cxLastVideoPos || 0));
+      if (posDelta > 0.02 || v.paused || v.ended) {
+        v.__cxLastProgressAt = now;
+      }
+      // Only time with the timeline actually advancing counts; stalls send no heartbeats.
+      if (!v.paused && !v.ended && posDelta > 0.001) {
+        v.__cxActivePlayedSec = (v.__cxActivePlayedSec || 0) + dt;
+      }
+      v.__cxLastTickAt = now;
+      v.__cxLastVideoPos = curPos;
+    }
+
+    function computeDynamicMaxRate(vf, cardWin, v, jobFinished, hasJob) {
       const D = Number(v && v.duration) || 0;
       if (!D || !Number.isFinite(D) || D <= 0) {
-        return { rate: 4, info: 'MAX: 等待获取视频总时长...' };
+        return { rate: 2, info: 'MAX: 等待获取视频总时长...' };
+      }
+      const curPos = Math.max(0, Math.min(D, Number(v.currentTime) || 0));
+
+      if (jobFinished || v.__cxServerPassed) {
+        return { rate: 16, info: 'MAX(任务点已通过) -> 16x冲刺' };
+      }
+      if (!hasJob) {
+        return { rate: 16, info: 'MAX(非任务点视频) -> 16x' };
       }
 
-      const curPos = Math.max(0, Math.min(D, Number(v.currentTime) || 0));
-      const now = Date.now();
-      let serverPlayTimeSec = 0;
-      let isAlreadyPassed = !!jobFinished;
       let rtVal = 0.9;
       try {
-        const setting = cardWin && (cardWin.AttachmentSetting || cardWin.mArg);
-        const atts = (setting && setting.attachments) || [];
-        const videoAtt = atts.find(function (a) {
-          return a && a.type === 'video';
-        });
-        if (videoAtt) {
-          if (videoAtt.playTime) {
-            serverPlayTimeSec = Math.floor(Number(videoAtt.playTime) / 1000);
-          }
-          if (videoAtt.isPassed) {
-            isAlreadyPassed = true;
-          }
-        }
         const vw = vf && vf.contentWindow;
         const p = vw && vw.videojs && vw.videojs.getPlayers && vw.videojs.getPlayers().video;
-        if (p && p.options_ && Number(p.options_.rt) > 0) {
-          rtVal = Number(p.options_.rt);
-        }
+        if (p && p.options_ && Number(p.options_.rt) > 0) rtVal = Number(p.options_.rt);
       } catch (e) {}
 
-      const actualJudgeRatio = rtVal / 4;
-      const safeTargetRatio = Math.min(
-        0.9,
-        Math.max(0.25, Math.round((actualJudgeRatio + 0.025) * 1000) / 1000)
-      );
-      const targetRealSec = Math.ceil(D * safeTargetRatio);
-
-      const expectedPosJump =
-        ((now - (v.__cxLastTickAt || now)) / 1000) * Math.max(1, state.rate || 4) + 8;
-      const seekedByUser =
-        typeof v.__cxLastVideoPos === 'number' && Math.abs(curPos - v.__cxLastVideoPos) > expectedPosJump;
-
-      if (
-        typeof v.__cxWallPlayedSec !== 'number' ||
-        typeof v.__cxInitRealSec !== 'number' ||
-        seekedByUser
-      ) {
-        let initReal = 0;
-        if (!isAlreadyPassed && serverPlayTimeSec > 0 && !seekedByUser) {
-          initReal = serverPlayTimeSec;
-        } else if (curPos > 0) {
-          initReal = Math.floor(curPos / 3);
-        }
-        v.__cxInitRealSec = initReal;
-        v.__cxWallPlayedSec = 0;
-        v.__cxLastTickAt = now;
-        v.__cxLastVideoPos = curPos;
-      } else {
-        const dt = Math.max(0, Math.min(2, (now - (v.__cxLastTickAt || now)) / 1000));
-        if (!v.paused && !v.ended) {
-          v.__cxWallPlayedSec += dt;
-        }
-        v.__cxLastTickAt = now;
-        v.__cxLastVideoPos = curPos;
-      }
-
-      const realPlayed = Math.min(D, (v.__cxInitRealSec || 0) + (v.__cxWallPlayedSec || 0));
+      const requiredSec = Math.ceil((D * rtVal) / 2) + MAX_TIME_MARGIN_SEC;
+      const watchedSec = Math.floor(v.__cxActivePlayedSec || 0);
+      const remWall = requiredSec - watchedSec;
       const remVideo = Math.max(0, D - curPos);
 
-      if (realPlayed >= targetRealSec) {
-        const infoDone =
-          'MAX(阈值25%=' + targetRealSec + 's): 实看' + Math.floor(realPlayed) + 's已达标 -> 16x冲刺';
-        return { rate: 16, info: infoDone };
+      let rate;
+      if (remWall <= 0) {
+        // Locally the requirement is met; keep a steady pace so heartbeats keep flowing until the server
+        // confirms (if the video ends first, the ended handler replays it).
+        rate = 2;
+      } else {
+        rate = Math.floor((remVideo / remWall) * 100) / 100;
+        rate = Math.min(MAX_PRE_PASS_RATE_CAP, Math.max(1, rate));
       }
 
-      const remRealNeeded = targetRealSec - realPlayed;
-      const rawRate = remRealNeeded > 0 ? remVideo / remRealNeeded : 16;
-      let calcRate = Math.floor(rawRate * 100) / 100;
-      calcRate = Math.min(16, Math.max(1, calcRate));
-
-      const infoText =
-        'MAX(阈值25%=' +
-        targetRealSec +
-        's): 实看' +
-        Math.floor(realPlayed) +
-        's | 剩' +
-        Math.round(remVideo) +
-        's -> ' +
-        calcRate +
-        'x';
-      return { rate: calcRate, info: infoText };
+      return {
+        rate: rate,
+        info:
+          'MAX(需实看' +
+          requiredSec +
+          's): 已看' +
+          watchedSec +
+          's | 剩' +
+          Math.round(remVideo) +
+          's -> ' +
+          rate +
+          'x'
+      };
     }
 
     function patchVideoIframe(vf, cardWin) {
@@ -769,6 +839,10 @@
           window.document.hasFocus = function () {
             return true;
           };
+          Object.defineProperty(vd, 'hidden', { get: function () { return false; }, configurable: true });
+          Object.defineProperty(vd, 'visibilityState', { get: function () { return 'visible'; }, configurable: true });
+          Object.defineProperty(window.document, 'hidden', { get: function () { return false; }, configurable: true });
+          Object.defineProperty(window.document, 'visibilityState', { get: function () { return 'visible'; }, configurable: true });
         } catch (e) {}
 
         try {
@@ -793,14 +867,172 @@
 
         const p = vw.videojs && vw.videojs.getPlayers && vw.videojs.getPlayers().video;
         const v = vd.querySelector('video');
-        if (!p || !v) return { ready: false };
+        if (!p || !v || !Number.isFinite(Number(v.duration)) || Number(v.duration) <= 0) {
+          // The player uses preload="none", so metadata (and duration) only loads after play() is called.
+          if (
+            state.enabled &&
+            p &&
+            v &&
+            v.paused &&
+            Date.now() - (v.__cxLoadKickAt || 0) > 4000
+          ) {
+            v.__cxLoadKickAt = Date.now();
+            try {
+              if (!v.__cxMustMuteForAutoplay) {
+                v.muted = false;
+                v.volume = 0.01;
+              }
+              const kp = p.play ? p.play() : v.play();
+              if (kp && kp.catch) {
+                kp.catch(function () {
+                  v.__cxMustMuteForAutoplay = true;
+                  v.muted = true;
+                  try {
+                    const kp2 = p.play ? p.play() : v.play();
+                    if (kp2 && kp2.catch) kp2.catch(function () {});
+                  } catch (e2) {}
+                });
+              }
+            } catch (e) {}
+          }
+          return { ready: false };
+        }
 
-        const hasJob = hasAttachmentJob(vf);
-        const jobFinished = isAttachmentJobFinished(vf, vw) || !!(p && p.finished);
+        // Hook XMLHttpRequest inside the video iframe to detect server {"isPassed": true} immediately
+        try {
+          if (vw.performance && typeof vw.performance.setResourceTimingBufferSize === 'function' && !vw.__cxRtBuf) {
+            vw.__cxRtBuf = true;
+            vw.performance.setResourceTimingBufferSize(5000);
+          }
+          if (vw.XMLHttpRequest && vw.XMLHttpRequest.prototype && !vw.XMLHttpRequest.prototype.__cxHookedV2) {
+            const origOpen = vw.XMLHttpRequest.prototype.open;
+            const origSend = vw.XMLHttpRequest.prototype.send;
+            vw.XMLHttpRequest.prototype.open = function (method, url) {
+              this.__cxUrl = String(url || '');
+              return origOpen.apply(this, arguments);
+            };
+            vw.XMLHttpRequest.prototype.send = function () {
+              if (this.__cxUrl && this.__cxUrl.includes('/multimedia/log/')) {
+                // selectCDN() reloads the source, so currentTime briefly reads 0 and Chaoxing's periodic
+                // heartbeat reports playingTime=0. The server treats that as a rewind and discards the
+                // progress accumulated so far, so drop that single bogus report.
+                try {
+                  const vid = vd.querySelector('video');
+                  const qs = new URL(this.__cxUrl, vw.location.href).searchParams;
+                  const pt = Number(qs.get('playingTime'));
+                  if (
+                    vid &&
+                    qs.get('isdrag') === '0' &&
+                    vid.__cxCdnSwitchUntil &&
+                    Date.now() < vid.__cxCdnSwitchUntil &&
+                    Number.isFinite(pt) &&
+                    pt < (vid.__cxCdnSwitchFrom || 0) - 5
+                  ) {
+                    return undefined;
+                  }
+                } catch (e) {}
+                this.addEventListener('load', function () {
+                  try {
+                    const txt = this.responseText || '';
+                    if (txt.includes('isPassed')) {
+                      const parsed = JSON.parse(txt);
+                      if (parsed && parsed.isPassed) {
+                        const vid = vd.querySelector('video');
+                        if (vid) vid.__cxServerPassed = true;
+                        try {
+                          if (typeof vw.proxy_completed === 'function') vw.proxy_completed();
+                        } catch (e) {}
+                        triggerSidebarRefresh();
+                      }
+                    }
+                  } catch (e) {}
+                });
+              }
+              return origSend.apply(this, arguments);
+            };
+            vw.XMLHttpRequest.prototype.__cxHookedV2 = true;
+          }
+        } catch (e) {}
+
+        const jobState = getVideoJobState(vf, vw, cardWin, v);
+        const hasJob = jobState.hasJob;
+        // Never use client-side p.finished when hasJob is true, because Video.js sets p.finished = true
+        // on the 'ended' event even when the server returns {"isPassed": false}!
+        const jobFinished = jobState.jobFinished || (!hasJob && !!(p && p.finished));
+
+        if (typeof v.__cxPassedOnInit !== 'boolean') {
+          v.__cxPassedOnInit = !!jobFinished;
+        }
+        if (jobFinished && !v.__cxPassedAt) {
+          v.__cxPassedAt = Date.now();
+        }
+        const readyToAdvance =
+          jobFinished &&
+          (v.__cxPassedOnInit ||
+            v.ended ||
+            (v.__cxPassedAt && Date.now() - v.__cxPassedAt > 15000));
+
+        // A task video resumed near its end can finish before the next 60s heartbeat fires, and the pass is
+        // only granted on a heartbeat, so restart it from 0 to guarantee at least one in-cap heartbeat.
+        if (
+          hasJob &&
+          !jobFinished &&
+          !v.__cxInitialSeekChecked &&
+          Number(v.duration) > 60 &&
+          Number(v.currentTime) > 0
+        ) {
+          v.__cxInitialSeekChecked = true;
+          const dur = Number(v.duration);
+          const rem = dur - Number(v.currentTime);
+          if ((v.__cxActivePlayedSec || 0) < 5 && rem < dur * 0.28) {
+            try {
+              p.finished = false;
+              p.ignoreSeek = false;
+              p.switchStatus = true;
+              v.currentTime = 0;
+              if (p.currentTime) p.currentTime(0);
+            } catch (e) {}
+          }
+        }
+
+        trackPlayback(v);
 
         if (state.mode === 'max') {
-          const maxObj = computeDynamicMaxRate(vf, cardWin, v, jobFinished);
+          const maxObj = computeDynamicMaxRate(vf, cardWin, v, jobFinished, hasJob);
           applyCalculatedMaxRate(maxObj.rate, maxObj.info);
+        }
+
+        // Auto-recover from CDN line stall (e.g., s2.cldisk.com hanging in readyState <= 2):
+        // If video is playing (!paused && !ended) but currentTime hasn't advanced for >8s, switch CDN playline.
+        if (
+          !v.paused &&
+          !v.ended &&
+          Number(v.duration) - Number(v.currentTime) > 3 &&
+          v.__cxLastProgressAt &&
+          Date.now() - v.__cxLastProgressAt > 8000 &&
+          Date.now() - (v.__cxLastCdnSwitchAt || 0) > 15000
+        ) {
+          v.__cxLastCdnSwitchAt = Date.now();
+          v.__cxLastProgressAt = Date.now();
+          try {
+            if (
+              p &&
+              typeof p.selectCDN === 'function' &&
+              p.options_ &&
+              Array.isArray(p.options_.playlines) &&
+              p.options_.playlines.length > 1
+            ) {
+              const curLine = typeof p.currentPlayline === 'function' ? p.currentPlayline() : null;
+              const curIdx = curLine && typeof curLine.indexorder === 'number' ? curLine.indexorder : 0;
+              const nextIdx = (curIdx + 1) % p.options_.playlines.length;
+              v.__cxCdnSwitchFrom = Number(v.currentTime) || 0;
+              v.__cxCdnSwitchUntil = Date.now() + 30000;
+              p.ignoreSeek = true;
+              p.selectCDN(nextIdx);
+            } else {
+              v.play().catch(function () {});
+            }
+          } catch (e) {}
         }
 
         if (!v.__cxPatched3x) {
@@ -885,6 +1117,22 @@
           lbl.textContent = state.rate + 'x';
         }
 
+        // Prevent Chromium background-tab media suspend:
+        // Chromium automatically pauses muted <video> elements when the tab/window is hidden.
+        // Keeping v.muted = false at 1% volume prevents background pause while staying nearly silent.
+        if (!v.__cxMustMuteForAutoplay) {
+          try {
+            if (v.muted) {
+              v.muted = false;
+              if (p.muted) p.muted(false);
+            }
+            if (v.volume > 0.02) {
+              v.volume = 0.01;
+              if (p.volume) p.volume(0.01);
+            }
+          } catch (e) {}
+        }
+
         const curSec = Math.floor(v.currentTime || 0);
         if (typeof p.dragCutOffTime === 'number' && curSec > p.dragCutOffTime) {
           p.dragCutOffTime = curSec;
@@ -898,11 +1146,10 @@
         if (v.ended && hasJob && !jobFinished) {
           if (!v.__cxEndedAt) {
             v.__cxEndedAt = Date.now();
-          } else if (Date.now() - v.__cxEndedAt > 3000) {
+          } else if (Date.now() - v.__cxEndedAt > 2500) {
             v.__cxEndedAt = 0;
-            v.__cxInitRealSec = (v.__cxInitRealSec || 0) + (v.__cxWallPlayedSec || 0);
-            v.__cxWallPlayedSec = 0;
             try {
+              p.finished = false;
               p.ignoreSeek = false;
               p.switchStatus = true;
               v.currentTime = 0;
@@ -918,9 +1165,14 @@
         if (v.paused && !v.ended && (!v.__cxAutoPlayedOnce || !jobFinished)) {
           v.__cxAutoPlayedOnce = true;
           try {
+            if (!v.__cxMustMuteForAutoplay) {
+              v.muted = false;
+              v.volume = 0.01;
+            }
             const playPromise = p.play ? p.play() : v.play();
             if (playPromise && playPromise.catch) {
               playPromise.catch(function () {
+                v.__cxMustMuteForAutoplay = true;
                 v.muted = true;
                 try {
                   p.muted(true);
@@ -943,7 +1195,8 @@
           duration: v.duration,
           dragCutOffTime: p.dragCutOffTime,
           hasJob: hasJob,
-          jobFinished: jobFinished
+          jobFinished: jobFinished,
+          readyToAdvance: readyToAdvance
         };
       } catch (e) {
         return { ready: false, error: String(e) };
@@ -1004,7 +1257,7 @@
 
       triggerSidebarRefresh();
 
-      const curCh = document.querySelector('#coursetree .posCatalog_active');
+      const curCh = getCurrentChapterElement();
       const curChCompleted = curCh ? isChapterCompletedInTree(curCh) : false;
 
       const tabs = Array.from(document.querySelectorAll('#prev_tab .prev_ul li'));
@@ -1027,9 +1280,17 @@
       ).filter(function (el) {
         return !!el.querySelector('[onclick*="getTeacherAjax"]');
       });
-      const curIdx = allChapters.findIndex(function (el) {
-        return el.classList.contains('posCatalog_active') || (chapterId && el.id === 'cur' + chapterId);
-      });
+      let curIdx = -1;
+      if (chapterId) {
+        curIdx = allChapters.findIndex(function (el) {
+          return el.id === 'cur' + chapterId;
+        });
+      }
+      if (curIdx < 0) {
+        curIdx = allChapters.findIndex(function (el) {
+          return el.classList.contains('posCatalog_active');
+        });
+      }
 
       let targetCh = null;
       for (let i = curIdx + 1; i < allChapters.length; i++) {
@@ -1050,6 +1311,12 @@
       if (targetCh) {
         const clickTarget = targetCh.querySelector('[onclick*="getTeacherAjax"]');
         if (clickTarget) {
+          try {
+            document.querySelectorAll('#coursetree .posCatalog_active').forEach(function (el) {
+              el.classList.remove('posCatalog_active');
+            });
+            targetCh.classList.add('posCatalog_active');
+          } catch (e) {}
           state.statusText =
             '本节已完成，正在进入：' + targetCh.innerText.trim().replace(/\s+/g, ' ');
           updateBadge();
@@ -1115,6 +1382,11 @@
         const videoFrames = Array.from(
           cardDoc.querySelectorAll('iframe.ans-insertvideo-online, iframe[src*="/modules/video/"]')
         );
+        if (videoFrames.length === 0 && cardHasVideoInSetting(cardWin, cardDoc) && elapsedOnTab < 12000) {
+          state.statusText = '等待视频组件初始化...';
+          updateBadge();
+          return;
+        }
         if (videoFrames.length > 0) {
           let allVideosDone = true;
           const statusParts = [];
@@ -1148,7 +1420,7 @@
                 (info.jobFinished ? ' [视频已完成]' : '')
             );
             if (info.hasJob) {
-              if (!info.jobFinished) allVideosDone = false;
+              if (!info.readyToAdvance) allVideosDone = false;
             } else {
               if (!info.ended && !info.jobFinished) allVideosDone = false;
             }

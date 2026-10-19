@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "超星学习通自动倍速与任务点助手 (MAX动态档位版)",
   "short_name": "超星倍速助手",
-  "version": "1.2.0",
-  "description": "支持 [1-16x] 自由调速、MAX 动态极速档位（基于25%真实观看时长安全阈值动态控速+16x冲刺）、Alt+S 开关、视频/PPT/PDF 任务点自动完成与自动下一节。",
+  "version": "1.3.1",
+  "description": "支持 [1-16x] 自由调速、MAX 档位（按服务端要求的约 45% 真实观看时长动态控速，通过后 16x 冲刺）、后台防暂停、Alt+S 开关、视频/PPT/PDF 任务点自动完成与自动下一节。",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -24,13 +24,17 @@
   ],
   "host_permissions": [
     "*://*.chaoxing.com/*",
-    "*://*.edu.cn/*"
+    "*://*.edu.cn/*",
+    "*://*.org.cn/*",
+    "*://*.com.cn/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "*://*.chaoxing.com/mycourse/studentstudy*",
-        "*://*.edu.cn/mycourse/studentstudy*"
+        "*://*.chaoxing.com/*mycourse/studentstudy*",
+        "*://*.edu.cn/*mycourse/studentstudy*",
+        "*://*.org.cn/*mycourse/studentstudy*",
+        "*://*.com.cn/*mycourse/studentstudy*"
       ],
       "js": [
         "page-controller.js"
@@ -40,8 +44,10 @@
     },
     {
       "matches": [
-        "*://*.chaoxing.com/mycourse/studentstudy*",
-        "*://*.edu.cn/mycourse/studentstudy*"
+        "*://*.chaoxing.com/*mycourse/studentstudy*",
+        "*://*.edu.cn/*mycourse/studentstudy*",
+        "*://*.org.cn/*mycourse/studentstudy*",
+        "*://*.com.cn/*mycourse/studentstudy*"
       ],
       "js": [
         "bridge.js"
@@ -56,7 +62,9 @@
       ],
       "matches": [
         "*://*.chaoxing.com/*",
-        "*://*.edu.cn/*"
+        "*://*.edu.cn/*",
+        "*://*.org.cn/*",
+        "*://*.com.cn/*"
       ]
     }
   ]
